@@ -1,5 +1,6 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 
+pub mod disputes;
 pub mod environment;
 pub mod linear;
 pub mod preimage;
