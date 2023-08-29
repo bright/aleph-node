@@ -8,5 +8,12 @@ It was built using [arkworks](https://github.com/arkworks-rs) libraries.
 2. `linear-equation` - representing `a·x + b = y`
 3. `preimage` - representing Poseidon 1:1 hashing
 4. `deposit`, `deposit-and-merge`, `merge` and `withdraw` relations that are used in Shielder zk-app (see: https://github.com/cardinal-Cryptography/zk-apps/)
+5. `vote` and `verdict` relations that are used in BrightDisputes zk-app (see: https://github.com/bright/bright-disputes/)
 
 All relations were built using [`liminal-ark-relation-macro`](https://crates.io/crates/liminal-ark-relation-macro).
+
+## Testing
+To run a unit test:
+```
+cargo test --release
+```

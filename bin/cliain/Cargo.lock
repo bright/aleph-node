@@ -2382,8 +2382,6 @@ dependencies = [
 [[package]]
 name = "liminal-ark-relations"
 version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d3945ac2a2c34261ea527c3253bfe2326a7ae99dc7b53039e136a750b7a33a9c"
 dependencies = [
  "ark-bls12-381",
  "ark-crypto-primitives",
