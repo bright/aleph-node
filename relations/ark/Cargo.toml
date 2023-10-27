@@ -12,6 +12,7 @@ description = "An instantiation of the Poseidon SNARK-friendly hash function."
 
 [dependencies]
 ark-bls12-381 = { version = "^0.3.0", default-features = false }
+ark-ec = { version = "^0.3.0", default-features = false }
 ark-ff = { version = "^0.3.0", default-features = false }
 ark-relations = { version = "^0.3.0", default-features = false }
 ark-serialize = { version = "^0.3.0", default-features = false }
@@ -22,8 +23,7 @@ paste = { version = "1.0.11" }
 
 # Required for computation in a circuit.
 ark-crypto-primitives = { version = "^0.3.0", default-features = false, features = [ "r1cs" ], optional = true }
-ark-ec = { version = "^0.3.0", default-features = false, optional = true }
-ark-ed-on-bls12-381 = { version = "^0.3.0", features = ["r1cs"], optional = true }
+ark-ed-on-bls12-381 = { version = "^0.3.0" }
 ark-gm17 = { version = "^0.3.0", default-features = false, optional = true }
 ark-groth16 = { version = "^0.3.0", default-features = false, optional = true }
 ark-marlin = { version = "^0.3.0", default-features = false, optional = true }
@@ -45,17 +45,17 @@ default = ["circuit-std"]
 std = [
     "ark-bls12-381/std",
     "ark-ff/std",
+    "ark-ec/std",
     "ark-relations/std",
     "ark-relations/tracing-subscriber",
     "ark-serialize/std",
     "ark-std/std",
-
+    "ark-ed-on-bls12-381/std",
     "liminal-ark-relation-macro/std",
 ]
 circuit = [
     "ark-crypto-primitives",
-    "ark-ec",
-    "ark-ed-on-bls12-381",
+    "ark-ed-on-bls12-381/std",
     "ark-gm17",
     "ark-groth16",
     "ark-marlin",
@@ -70,7 +70,6 @@ circuit-std = [
     "circuit",
     "std",
     "ark-crypto-primitives/std",
-    "ark-ec/std",
     "ark-ed-on-bls12-381/std",
     "ark-gm17/std",
     "ark-groth16/std",

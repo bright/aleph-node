@@ -1,24 +1,48 @@
-mod ecdh;
+pub mod ecdh;
 mod types;
-mod verdict;
+mod verdict_negative;
+mod verdict_none;
+mod verdict_positive;
 mod vote;
 
 pub use types::{
     BackendHash, BackendHashes, BackendVote, BackendVotes, FrontendHash, FrontendHashes,
-    FrontendVote, FrontendVotes, FrontendVotesSum,
+    FrontendVerdict, FrontendVote, FrontendVotes, FrontendVotesSum,
 };
 
+use ark_ed_on_bls12_381::EdwardsAffine as JubJub;
 use ark_ff::BigInteger256;
+use liminal_ark_poseidon::hash::two_to_one_hash;
 
 #[derive(Debug)]
 pub enum Error {
     InvalidSize,
 }
 
-pub use verdict::{
-    VerdictRelationWithFullInput, VerdictRelationWithPublicInput, VerdictRelationWithoutInput,
+#[derive(Debug)]
+pub enum VerdictRelation {
+    None = 1,
+    Negative = 2,
+    Positive = 3,
+}
+
+pub use verdict_negative::{
+    VerdictNegativeRelationWithFullInput, VerdictNegativeRelationWithPublicInput,
+    VerdictNegativeRelationWithoutInput,
+};
+pub use verdict_none::{
+    VerdictNoneRelationWithFullInput, VerdictNoneRelationWithPublicInput,
+    VerdictNoneRelationWithoutInput,
+};
+pub use verdict_positive::{
+    VerdictPositiveRelationWithFullInput, VerdictPositiveRelationWithPublicInput,
+    VerdictPositiveRelationWithoutInput,
 };
 pub use vote::{VoteRelationWithFullInput, VoteRelationWithPublicInput, VoteRelationWithoutInput};
+
+use crate::environment::CircuitField;
+
+pub const MAX_VOTES_LEN: u8 = 9;
 
 pub fn hash_to_field(hash: FrontendHash) -> BackendHash {
     BackendHash::new(BigInteger256::new(hash))
@@ -39,6 +63,19 @@ pub fn field_to_vote(field: BackendVote) -> FrontendVote {
 
 pub fn vec_of_votes_to_fields(front: FrontendVotes) -> BackendVotes {
     front.into_iter().map(vote_to_filed).collect()
+}
+
+pub fn make_shared_key_hash(shared_key: JubJub) -> BackendHash {
+    two_to_one_hash([shared_key.x, shared_key.y])
+}
+
+pub fn make_two_to_one_hash(val1: CircuitField, val2: CircuitField) -> CircuitField {
+    two_to_one_hash([val1, val2])
+}
+
+pub fn hash_two_to_one(val1: FrontendHash, val2: FrontendHash) -> FrontendHash {
+    let field = two_to_one_hash([hash_to_field(val1), hash_to_field(val2)]);
+    field.0 .0
 }
 
 #[cfg(all(test))]
@@ -74,6 +111,16 @@ pub mod tests {
 
     #[test]
     fn test_vec_of_votes_to_fields() {
+        let votes: FrontendVotes = (0..10).into_iter().map(|v| v % 2).collect();
+        let fields: BackendHashes = votes
+            .iter()
+            .map(|v| CircuitField::from(*v as u64))
+            .collect();
+        assert_eq!(fields, vec_of_votes_to_fields(votes));
+    }
+
+    #[test]
+    fn test_hash_two_to_one() {
         let votes: FrontendVotes = (0..10).into_iter().map(|v| v % 2).collect();
         let fields: BackendHashes = votes
             .iter()

@@ -27,7 +27,7 @@ pub fn parse_frontend_hashes(frontend_hashes: &str) -> Result<FrontendHashes> {
 
 pub fn parse_frontend_votes(frontend_votes: &str) -> Result<FrontendVotes> {
     Ok(frontend_votes
-        .split(':')
+        .split(',')
         .map(|l| u8::from_str(l).expect("Each element should be a valid `u8`"))
         .collect::<Vec<_>>())
 }

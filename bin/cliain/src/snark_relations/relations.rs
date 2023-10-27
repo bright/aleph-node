@@ -1,8 +1,9 @@
 use clap::Subcommand;
 use liminal_ark_relations::{
     disputes::{
-        FrontendHash, FrontendHashes, FrontendVote, FrontendVotes, FrontendVotesSum,
-        VerdictRelationWithFullInput, VerdictRelationWithPublicInput, VerdictRelationWithoutInput,
+        FrontendHash, FrontendHashes, FrontendVote, FrontendVotes, FrontendVotesSum, FrontendVerdict,
+        VerdictPositiveRelationWithFullInput, VerdictPositiveRelationWithPublicInput, VerdictPositiveRelationWithoutInput,    VerdictNoneRelationWithFullInput, VerdictNoneRelationWithPublicInput, VerdictNoneRelationWithoutInput,
+        VerdictNegativeRelationWithFullInput, VerdictNegativeRelationWithPublicInput, VerdictNegativeRelationWithoutInput,
         VoteRelationWithFullInput, VoteRelationWithPublicInput, VoteRelationWithoutInput,
     },
     environment::CircuitField,
@@ -201,19 +202,58 @@ pub enum RelationArgs {
         new_token_amount: Option<FrontendTokenAmount>,
     },
 
-    Verdict {
-        /// Maximum number of votes.
-        #[clap(long, default_value = "5")]
-        max_votes_len: u8,
+    VerdictNegative {
         /// Vector of decoded votes (private input).
         #[clap(long, value_parser = parse_frontend_votes)]
         decoded_votes: Option<FrontendVotes>,
         /// Vector of hashed shared keys (private input).
         #[clap(long, value_parser = parse_frontend_hashes)]
         hashed_shared_keys: Option<FrontendHashes>,
-        /// Sum of decoded votes (public input).
+        /// Maximum sum of votes (public input).
         #[clap(long)]
-        votes_sum: Option<FrontendVotesSum>,
+        max_votes: Option<FrontendVotesSum>,
+        /// Verdict of the dispute (public input).
+        #[clap(long)]
+        verdict: Option<FrontendVerdict>,
+        /// Vector of hashed shared keys (public input).
+        #[clap(long, value_parser = parse_frontend_hash)]
+        hashed_votes: Option<FrontendHash>,
+    },
+
+    VerdictNone {
+        /// Vector of decoded votes (private input).
+        #[clap(long, value_parser = parse_frontend_votes)]
+        decoded_votes: Option<FrontendVotes>,
+        /// Vector of hashed shared keys (private input).
+        #[clap(long, value_parser = parse_frontend_hashes)]
+        hashed_shared_keys: Option<FrontendHashes>,
+        /// Maximum sum of votes (public input).
+        #[clap(long)]
+        max_votes: Option<FrontendVotesSum>,
+        /// Minimum sum of votes (public input).
+        #[clap(long)]
+        min_votes: Option<FrontendVotesSum>,
+        /// Verdict of the dispute (public input).
+        #[clap(long)]
+        verdict: Option<FrontendVerdict>,
+        /// Vector of hashed shared keys (public input).
+        #[clap(long, value_parser = parse_frontend_hash)]
+        hashed_votes: Option<FrontendHash>,
+    },
+
+    VerdictPositive {
+        /// Vector of decoded votes (private input).
+        #[clap(long, value_parser = parse_frontend_votes)]
+        decoded_votes: Option<FrontendVotes>,
+        /// Vector of hashed shared keys (private input).
+        #[clap(long, value_parser = parse_frontend_hashes)]
+        hashed_shared_keys: Option<FrontendHashes>,
+        /// Minimum sum of votes (public input).
+        #[clap(long)]
+        min_votes: Option<FrontendVotesSum>,
+        /// Verdict of the dispute (public input).
+        #[clap(long)]
+        verdict: Option<FrontendVerdict>,
         /// Vector of hashed shared keys (public input).
         #[clap(long, value_parser = parse_frontend_hash)]
         hashed_votes: Option<FrontendHash>,
@@ -226,9 +266,15 @@ pub enum RelationArgs {
         /// Hashed shared key (private input).
         #[clap(long, value_parser = parse_frontend_hash)]
         hashed_shared_key: Option<FrontendHash>,
-        /// Result of the vote encryption with the shared key hash (private input).
+        /// Result of the vote encryption with the shared key hash (public input).
         #[clap(long, value_parser = parse_frontend_hash)]
         encrypted_vote: Option<FrontendHash>,
+        /// Old encrypted all votes (public input).
+        #[clap(long, value_parser = parse_frontend_hash)]
+        old_encrypted_all_votes: Option<FrontendHash>,
+        /// New encrypted all votes(public input).
+        #[clap(long, value_parser = parse_frontend_hash)]
+        new_encrypted_all_votes: Option<FrontendHash>,
     },
 
     Withdraw {
@@ -294,7 +340,9 @@ impl RelationArgs {
             RelationArgs::Deposit { .. } => String::from("deposit"),
             RelationArgs::DepositAndMerge { .. } => String::from("deposit_and_merge"),
             RelationArgs::Merge { .. } => String::from("merge"),
-            RelationArgs::Verdict { .. } => String::from("verdict"),
+            RelationArgs::VerdictNegative { .. } => String::from("verdict_negative"),
+            RelationArgs::VerdictNone { .. } => String::from("verdict_none"),
+            RelationArgs::VerdictPositive { .. } => String::from("verdict_positive"),
             RelationArgs::Vote { .. } => String::from("vote"),
             RelationArgs::Withdraw { .. } => String::from("withdraw"),
             RelationArgs::Preimage { .. } => String::from("preimage"),
@@ -438,21 +486,67 @@ impl ConstraintSynthesizer<CircuitField> for RelationArgs {
                 .generate_constraints(cs)
             }
 
-            RelationArgs::Verdict {
-                max_votes_len,
+            RelationArgs::VerdictNegative {
                 decoded_votes,
                 hashed_shared_keys,
-                votes_sum,
+                max_votes,
+                verdict,
                 hashed_votes,
             } =>
             {
                 if cs.is_in_setup_mode() {
-                    return VerdictRelationWithoutInput::new(max_votes_len).generate_constraints(cs);
+                    return VerdictNegativeRelationWithoutInput::new().generate_constraints(cs);
                 }
 
-                    VerdictRelationWithFullInput::new(
-                    max_votes_len,
-                    votes_sum.unwrap_or_else(|| panic!("You must provide sum of decoded votes")),
+                VerdictNegativeRelationWithFullInput::new(
+                    max_votes.unwrap_or_else(|| panic!("You must provide max_votes of decoded votes")),
+                    verdict.unwrap_or_else(|| panic!("You must provide the verdict")),
+                    hashed_votes.unwrap_or_else(|| panic!("You must provide hash of all votes")),
+                    decoded_votes.unwrap_or_else(|| panic!("You must provide vector of decoded votes")),
+                    hashed_shared_keys.unwrap_or_else(|| panic!("You must provide vector of hashed shared keys")),
+                )
+                .generate_constraints(cs)
+            }
+
+            RelationArgs::VerdictNone {
+                decoded_votes,
+                hashed_shared_keys,
+                max_votes,
+                min_votes,
+                verdict,
+                hashed_votes,
+            } =>
+            {
+                if cs.is_in_setup_mode() {
+                    return VerdictNoneRelationWithoutInput::new().generate_constraints(cs);
+                }
+
+                VerdictNoneRelationWithFullInput::new(
+                    max_votes.unwrap_or_else(|| panic!("You must provide max_votes of decoded votes")),
+                    min_votes.unwrap_or_else(|| panic!("You must provide min_votes of decoded votes")),
+                    verdict.unwrap_or_else(|| panic!("You must provide the verdict")),
+                    hashed_votes.unwrap_or_else(|| panic!("You must provide hash of all votes")),
+                    decoded_votes.unwrap_or_else(|| panic!("You must provide vector of decoded votes")),
+                    hashed_shared_keys.unwrap_or_else(|| panic!("You must provide vector of hashed shared keys")),
+                )
+                .generate_constraints(cs)
+            }
+
+            RelationArgs::VerdictPositive {
+                decoded_votes,
+                hashed_shared_keys,
+                min_votes,
+                verdict,
+                hashed_votes,
+            } =>
+            {
+                if cs.is_in_setup_mode() {
+                    return VerdictPositiveRelationWithoutInput::new().generate_constraints(cs);
+                }
+
+                    VerdictPositiveRelationWithFullInput::new(
+                    min_votes.unwrap_or_else(|| panic!("You must provide min_votes of decoded votes")),
+                    verdict.unwrap_or_else(|| panic!("You must provide the verdict")),
                     hashed_votes.unwrap_or_else(|| panic!("You must provide hash of all votes")),
                     decoded_votes.unwrap_or_else(|| panic!("You must provide vector of decoded votes")),
                     hashed_shared_keys.unwrap_or_else(|| panic!("You must provide vector of hashed shared keys")),
@@ -464,6 +558,8 @@ impl ConstraintSynthesizer<CircuitField> for RelationArgs {
                 vote,
                 hashed_shared_key,
                 encrypted_vote,
+                old_encrypted_all_votes,
+                new_encrypted_all_votes,
             } => {
                     if cs.is_in_setup_mode() {
                         return VoteRelationWithoutInput::new()
@@ -471,6 +567,8 @@ impl ConstraintSynthesizer<CircuitField> for RelationArgs {
                     }
                     VoteRelationWithFullInput::new(
                     encrypted_vote.unwrap_or_else(|| panic!("You must provide encrypted vote")),
+                    old_encrypted_all_votes.unwrap_or_else(|| panic!("You must provide old encrypted votes")),
+                    new_encrypted_all_votes.unwrap_or_else(|| panic!("You must provide new encrypted votes")),
                     vote.unwrap_or_else(|| panic!("You must provide vote")),
                     hashed_shared_key.unwrap_or_else(|| panic!("You must provide hashed shared key")),
                 )
@@ -626,30 +724,100 @@ impl GetPublicInput for RelationArgs {
                 }
             }
 
-            RelationArgs::Verdict {
-                max_votes_len,
-                votes_sum,
+            RelationArgs::VerdictNegative {
+                max_votes,
+                verdict,
                 hashed_votes,
                 ..
             } => {
                 match (
-                    votes_sum,
+                    max_votes,
+                    verdict,
                     hashed_votes,
                 ) {
                     (                   
-                        Some(votes_sum),
-                        Some(hashed_votes,)
-                    ) => VerdictRelationWithPublicInput::new (
-                        *max_votes_len,
-                        *votes_sum,
+                        Some(max_votes),
+                        Some(verdict),
+                        Some(hashed_votes),
+                    ) => VerdictNegativeRelationWithPublicInput::new (
+                        *max_votes,
+                        *verdict,
                         *hashed_votes,
                     ).serialize_public_input(),
                     _ => panic!("Provide at least public (sum of votes, hashed votes)."),
                 }
             }
 
-            RelationArgs::Vote { encrypted_vote, .. } => VoteRelationWithPublicInput::new(encrypted_vote.unwrap_or_else(|| panic!("You must provide hash"))).serialize_public_input(),
+            RelationArgs::VerdictNone {
+                max_votes,
+                min_votes,
+                verdict,
+                hashed_votes,
+                ..
+            } => {
+                match (
+                    max_votes,
+                    min_votes,
+                    verdict,
+                    hashed_votes,
+                ) {
+                    (   
+                        Some(max_votes),                
+                        Some(min_votes),
+                        Some(verdict),
+                        Some(hashed_votes),
+                    ) => VerdictNoneRelationWithPublicInput::new (
+                        *max_votes,
+                        *min_votes,
+                        *verdict,
+                        *hashed_votes,
+                    ).serialize_public_input(),
+                    _ => panic!("Provide at least public (sum of votes, hashed votes)."),
+                }
+            }
 
+            RelationArgs::VerdictPositive {
+                min_votes,
+                verdict,
+                hashed_votes,
+                ..
+            } => {
+                match (
+                    min_votes,
+                    verdict,
+                    hashed_votes,
+                ) {
+                    (                   
+                        Some(min_votes),
+                        Some(verdict),
+                        Some(hashed_votes),
+                    ) => VerdictPositiveRelationWithPublicInput::new (
+                        *min_votes,
+                        *verdict,
+                        *hashed_votes,
+                    ).serialize_public_input(),
+                    _ => panic!("Provide at least public (sum of votes, hashed votes)."),
+                }
+            }
+
+            RelationArgs::Vote { encrypted_vote, old_encrypted_all_votes, new_encrypted_all_votes, .. } => {
+                match (
+                    encrypted_vote,
+                    old_encrypted_all_votes,
+                    new_encrypted_all_votes,
+                ) {
+                    (                   
+                        Some(encrypted_vote),
+                        Some(old_encrypted_all_votes),
+                        Some(new_encrypted_all_votes),
+                    ) => VoteRelationWithPublicInput::new (
+                        *encrypted_vote,
+                        *old_encrypted_all_votes,
+                        *new_encrypted_all_votes,
+                    ).serialize_public_input(),
+                    _ => panic!("Provide at least public (encrypted vote, hash of all old encrypted votes, hash of all new encrypted votes)."),
+                }
+            }
 
             RelationArgs::Withdraw {
                 max_path_len,

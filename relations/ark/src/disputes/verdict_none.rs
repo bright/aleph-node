@@ -14,7 +14,8 @@ use liminal_ark_relation_macro::snark_relation;
 mod relation {
     #[cfg(feature = "circuit")]
     use {
-        crate::environment::FpVar,
+        crate::disputes::{VerdictRelation, MAX_VOTES_LEN},
+        crate::environment::{CircuitField, FpVar},
         ark_r1cs_std::{alloc::AllocVar, eq::EqGadget, fields::FieldVar},
         ark_relations::{ns, r1cs::SynthesisError::UnconstrainedVariable},
         ark_std::Zero,
@@ -25,20 +26,15 @@ mod relation {
     use crate::disputes::{
         hash_to_field,
         types::{
-            BackendHash, BackendHashes, BackendVotes, BackendVotesSum, FrontendHash,
-            FrontendHashes, FrontendVotes, FrontendVotesSum,
+            BackendHash, BackendHashes, BackendVerdict, BackendVotes, BackendVotesSum,
+            FrontendHash, FrontendHashes, FrontendVerdict, FrontendVotes, FrontendVotesSum,
         },
         vec_of_hashes_to_fields, vec_of_votes_to_fields,
     };
 
-    use crate::environment::CircuitField;
-
     #[relation_object_definition]
     #[derive(Clone, Debug)]
-    struct VerdictRelation {
-        #[constant]
-        pub max_votes_len: u8,
-
+    struct VerdictNoneRelation {
         // Private inputs
         #[private_input(frontend_type = "FrontendVotes", parse_with = "vec_of_votes_to_fields")]
         pub decoded_votes: BackendVotes,
@@ -50,7 +46,11 @@ mod relation {
 
         // Public inputs
         #[public_input(frontend_type = "FrontendVotesSum")]
-        pub votes_sum: BackendVotesSum,
+        pub max_votes: BackendVotesSum,
+        #[public_input(frontend_type = "FrontendVotesSum")]
+        pub min_votes: BackendVotesSum,
+        #[public_input(frontend_type = "FrontendVerdict")]
+        pub verdict: BackendVerdict,
         #[public_input(frontend_type = "FrontendHash", parse_with = "hash_to_field")]
         pub hashed_votes: BackendHash,
     }
@@ -58,39 +58,31 @@ mod relation {
     #[cfg(feature = "circuit")]
     #[circuit_definition]
     fn generate_constraints() {
-        let max_votes_len = self.max_votes_len().clone();
         let votes = &self.decoded_votes().cloned().unwrap_or_default();
         let hashed_shared_keys = &self.hashed_shared_keys().cloned().unwrap_or_default();
-        if votes.len() > max_votes_len as usize {
+        if votes.len() > MAX_VOTES_LEN as usize {
             return Err(UnconstrainedVariable);
         }
         if hashed_shared_keys.len() != votes.len() {
             return Err(UnconstrainedVariable);
         }
 
-        let votes_sum = FpVar::new_input(ns!(cs.clone(), "votes_sum"), || self.votes_sum())?;
+        let max_votes = FpVar::new_input(ns!(cs.clone(), "max_votes"), || self.max_votes())?;
+        let min_votes = FpVar::new_input(ns!(cs.clone(), "min_votes"), || self.min_votes())?;
+        let verdict = FpVar::new_input(ns!(cs.clone(), "verdict"), || self.verdict())?;
         let hashed_verdict =
             FpVar::new_input(ns!(cs.clone(), "hashed_votes"), || self.hashed_votes())?;
-
-        let one = FpVar::new_constant(ns!(cs, "positive"), CircuitField::from(1u64))?;
-        let zero = FpVar::new_constant(ns!(cs, "negative"), CircuitField::from(0u64))?;
 
         let zero_vote = CircuitField::zero();
         let mut computed_hash = FpVar::one();
         let mut computed_votes = FpVar::zero();
-        for i in 0..max_votes_len as usize {
+        for i in 0..MAX_VOTES_LEN as usize {
             let vote = FpVar::new_witness(ns!(cs.clone(), "vote"), || {
                 Ok(votes.get(i).unwrap_or(&zero_vote))
             })?;
             let shared_key = FpVar::new_witness(ns!(cs, "key"), || {
                 Ok(hashed_shared_keys.get(i).unwrap_or(&zero_vote))
             })?;
-
-            //---------------------------------------
-            // Check if vote is valid, can be: [0,1]
-            //---------------------------------------
-            vote.enforce_cmp(&one, Ordering::Less, true)?;
-            vote.enforce_cmp(&zero, Ordering::Greater, true)?;
 
             //--------------------
             // Counting the votes
@@ -108,10 +100,20 @@ mod relation {
         //-----------------------------------
         hashed_verdict.enforce_equal(&computed_hash)?;
 
+        //-------------------------------------------------
+        // Check if computed votes meet verdict conditions
+        //-------------------------------------------------
+        computed_votes.enforce_cmp(&max_votes, Ordering::Less, false)?;
+        computed_votes.enforce_cmp(&min_votes, Ordering::Greater, false)?;
+
         //-------------------------------------------
-        // Check if computed sum of votes is correct
+        // Check if verdict correspond to right case
         //-------------------------------------------
-        votes_sum.enforce_equal(&computed_votes)?;
+        let limit = FpVar::new_constant(
+            ns!(cs, "verdict_value"),
+            CircuitField::from(VerdictRelation::None as u64),
+        )?;
+        verdict.enforce_equal(&limit)?;
 
         Ok(())
     }
@@ -120,36 +122,46 @@ mod relation {
 #[cfg(all(test, feature = "circuit"))]
 mod tests {
     use super::{
-        VerdictRelationWithFullInput, VerdictRelationWithPublicInput, VerdictRelationWithoutInput,
+        VerdictNoneRelationWithFullInput, VerdictNoneRelationWithPublicInput,
+        VerdictNoneRelationWithoutInput,
     };
     use crate::disputes::ecdh::{Ecdh, EcdhScheme};
     use crate::disputes::types::{FrontendHashes, FrontendVotes};
-    use crate::disputes::vote_to_filed;
+    use crate::disputes::{vote_to_filed, VerdictRelation, MAX_VOTES_LEN};
     use crate::environment::CircuitField;
     use ark_bls12_381::Bls12_381;
     use ark_crypto_primitives::SNARK;
-    use ark_ed_on_bls12_381::{
-        EdwardsAffine as JubJubAffine, EdwardsProjective as JubJub, Fr as JubJubFr,
-    };
+    use ark_ed_on_bls12_381::{EdwardsAffine as JubJubAffine, EdwardsProjective as JubJub};
     use ark_groth16::Groth16;
     use ark_relations::r1cs::{ConstraintSynthesizer, ConstraintSystem};
     use ark_std::{One, Zero};
     use liminal_ark_poseidon::hash::two_to_one_hash;
 
-    const MAX_VOTES_LEN: u8 = 4;
+    fn get_circuit_with_full_input() -> VerdictNoneRelationWithFullInput {
+        let votes = vec![1u8, 0u8, 1u8];
 
-    fn get_circuit_with_full_input() -> VerdictRelationWithFullInput {
-        let rng = &mut ark_std::test_rng();
+        let judge_priv_key = Ecdh::<JubJub>::deserialize_private_key(vec![
+            25, 164, 133, 151, 251, 54, 205, 192, 212, 173, 218, 155, 210, 238, 98, 4, 36, 68, 162,
+            114, 94, 30, 134, 181, 187, 167, 219, 131, 227, 25, 202, 6,
+        ]);
 
-        let votes = vec![1u8, 1u8, 0u8];
+        let juror4_pub = Ecdh::<JubJub>::deserialize_public_key(vec![
+            143, 96, 146, 215, 67, 186, 237, 47, 231, 60, 4, 227, 180, 180, 227, 175, 139, 11, 9,
+            212, 45, 153, 174, 82, 61, 94, 185, 142, 229, 93, 248, 141,
+        ]);
+        let juror5_pub = Ecdh::<JubJub>::deserialize_public_key(vec![
+            93, 66, 190, 16, 93, 13, 181, 112, 42, 68, 88, 90, 88, 65, 241, 30, 80, 202, 221, 3,
+            137, 104, 89, 40, 93, 2, 69, 100, 36, 104, 158, 72,
+        ]);
+        let juror6_pub = Ecdh::<JubJub>::deserialize_public_key(vec![
+            199, 48, 32, 250, 139, 107, 224, 127, 96, 217, 223, 140, 130, 3, 111, 69, 146, 249, 47,
+            219, 36, 50, 38, 216, 154, 163, 197, 232, 65, 72, 57, 115,
+        ]);
 
-        // Generate Judge and Jurors pub/priv keys
-        let (pub_judge, priv_judge) = Ecdh::<JubJub>::generate_keys(rng);
-        let jurors_keys = (0..votes.len())
-            .map(|_| Ecdh::<JubJub>::generate_keys(rng))
-            .collect::<Vec<(_, _)>>();
-
-        let key_zero = (JubJubAffine::zero(), JubJubFr::zero());
+        let jurors_keys = vec![juror4_pub, juror5_pub, juror6_pub];
+        let key_zero = JubJubAffine::zero();
+        let max_sum: u8 = 3;
+        let min_sum: u8 = 0;
         let mut hashed_shared_keys = FrontendHashes::new();
         let mut hashed_votes = CircuitField::one();
         let mut front_votes = FrontendVotes::new();
@@ -159,22 +171,19 @@ mod tests {
             front_votes.push(*v);
 
             // Prepare hash of votes and shared key
-            let k = jurors_keys.get(i).unwrap_or(&key_zero);
-            let shared_jure_key = Ecdh::<JubJub>::make_shared_key(pub_judge, k.1);
-            let shared_jure_key = two_to_one_hash([shared_jure_key.x, shared_jure_key.y]);
-            hashed_votes =
-                two_to_one_hash([vote_to_filed(*v) + shared_jure_key.clone(), hashed_votes]);
+            let juror_pub = jurors_keys.get(i).unwrap_or(&key_zero);
+            let shared_key = Ecdh::<JubJub>::make_shared_key(*juror_pub, judge_priv_key);
+            let shared_key = two_to_one_hash([shared_key.x, shared_key.y]);
+            hashed_votes = two_to_one_hash([vote_to_filed(*v) + shared_key.clone(), hashed_votes]);
 
             // Prepare inputs votes
-            let shared_judge_key = Ecdh::<JubJub>::make_shared_key(k.0, priv_judge);
-            let shared_judge_key = two_to_one_hash([shared_judge_key.x, shared_judge_key.y]);
-            hashed_shared_keys.push(shared_judge_key.0 .0);
+            hashed_shared_keys.push(shared_key.0 .0);
         }
 
-        let sum: u8 = votes.iter().map(|v| *v as u8).sum();
-        VerdictRelationWithFullInput::new(
-            MAX_VOTES_LEN,
-            sum,
+        VerdictNoneRelationWithFullInput::new(
+            max_sum,
+            min_sum,
+            VerdictRelation::None as u8,
             hashed_votes.0 .0,
             front_votes,
             hashed_shared_keys,
@@ -198,7 +207,7 @@ mod tests {
 
     #[test]
     fn verdict_proving_procedure() {
-        let circuit_without_input = VerdictRelationWithoutInput::new(MAX_VOTES_LEN);
+        let circuit_without_input = VerdictNoneRelationWithoutInput::new();
 
         let mut rng = ark_std::test_rng();
         let (pk, vk) =
@@ -207,7 +216,7 @@ mod tests {
         let circuit_with_full_input = get_circuit_with_full_input();
         let proof = Groth16::prove(&pk, circuit_with_full_input, &mut rng).unwrap();
 
-        let circuit_with_public_input: VerdictRelationWithPublicInput =
+        let circuit_with_public_input: VerdictNoneRelationWithPublicInput =
             get_circuit_with_full_input().into();
         let input = circuit_with_public_input.serialize_public_input();
 

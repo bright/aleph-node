@@ -324,9 +324,9 @@ impl pallet_aleph::Config for Runtime {
 #[cfg(feature = "liminal")]
 parameter_types! {
     // We allow 10kB keys, proofs and public inputs. This is a 100% blind guess.
-    pub const MaximumVerificationKeyLength: u32 = 10_000;
-    pub const MaximumDataLength: u32 = 10_000;
-    pub const VerificationKeyDepositPerByte: u128 = MILLI_AZERO;
+    pub const MaximumVerificationKeyLength: u32 = 5_120_000;
+    pub const MaximumDataLength: u32 = 5_120_000;
+    pub const VerificationKeyDepositPerByte: u128 = NANO_AZERO;
 }
 
 #[cfg(feature = "liminal")]
@@ -713,7 +713,7 @@ impl pallet_contracts::Config for Runtime {
     type Schedule = Schedule;
     type CallStack = [pallet_contracts::Frame<Self>; 16];
     type AddressGenerator = pallet_contracts::DefaultAddressGenerator;
-    type MaxCodeLen = ConstU32<{ 128 * 1024 }>;
+    type MaxCodeLen = ConstU32<{ 512 * 1024 }>;
     type MaxStorageKeyLen = ConstU32<128>;
     type UnsafeUnstableInterface = ConstBool<false>;
     type MaxDebugBufferLen = ConstU32<{ 2 * 1024 * 1024 }>;

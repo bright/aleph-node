@@ -1,11 +1,15 @@
+use crate::{
+    serialization::{deserialize, serialize},
+    CanonicalSerialize,
+};
 use ark_ec::{AffineCurve, ProjectiveCurve};
 use ark_ff::{bytes::ToBytes, fields::PrimeField, UniformRand};
-use ark_std::{hash::Hash, marker::PhantomData, rand::Rng};
+use ark_std::{hash::Hash, io::Cursor, marker::PhantomData, rand::Rng, vec, vec::Vec};
 
 /// A simple trait for generating a pub/priv keys and creating an ECDH shred key.
 pub trait EcdhScheme {
-    type PublicKey: ToBytes + Hash + Eq + Clone + Default + Send + Sync;
     type PrivateKey: ToBytes + Clone + Default;
+    type PublicKey: ToBytes + Hash + Eq + Clone + Default + Send + Sync;
     type SharedKey: ToBytes + Hash + Eq + Clone + Default + Send + Sync;
 
     /// Generate a pair of public and private keys.
@@ -15,6 +19,16 @@ pub trait EcdhScheme {
         public_key: Self::PublicKey,
         private_key: Self::PrivateKey,
     ) -> Self::SharedKey;
+
+    /// Serialize public key
+    fn serialize_public_key(public_key: Self::PublicKey) -> Vec<u8>;
+    /// Deserialize public key
+    fn deserialize_public_key(public_key: Vec<u8>) -> Self::PublicKey;
+
+    /// Serialize private key
+    fn serialize_private_key(private_key: Self::PrivateKey) -> Vec<u8>;
+    /// Deserialize private key
+    fn deserialize_private_key(private_key: Vec<u8>) -> Self::PrivateKey;
 }
 
 pub struct Ecdh<C: ProjectiveCurve> {
@@ -45,16 +59,36 @@ where
     ) -> Self::SharedKey {
         public_key.mul(private_key).into()
     }
+
+    fn serialize_public_key(public_key: Self::PublicKey) -> Vec<u8> {
+        let buf_size = C::zero().serialized_size();
+        let mut serialized = vec![0; buf_size];
+        let mut cursor = Cursor::new(&mut serialized[..]);
+        public_key.serialize(&mut cursor).unwrap();
+        serialized
+    }
+
+    fn deserialize_public_key(public_key: Vec<u8>) -> Self::PublicKey {
+        let mut cursor = Cursor::new(&public_key[..]);
+        C::deserialize(&mut cursor).unwrap().into()
+    }
+
+    fn serialize_private_key(private_key: Self::PrivateKey) -> Vec<u8> {
+        serialize(&private_key)
+    }
+
+    fn deserialize_private_key(bytes: Vec<u8>) -> Self::PrivateKey {
+        deserialize(&bytes)
+    }
 }
 
 #[cfg(test)]
 mod test {
     use super::*;
+    use ark_ed_on_bls12_381::EdwardsProjective as JubJub;
 
     #[test]
     fn test_ecdh() {
-        use ark_ed_on_bls12_381::EdwardsProjective as JubJub;
-
         let rng = &mut ark_std::test_rng();
 
         let (pub_alice, priv_alice) = Ecdh::<JubJub>::generate_keys(rng);
@@ -72,5 +106,19 @@ mod test {
         let sh_key_bob = liminal_ark_poseidon::hash::two_to_one_hash([shared_bob.x, shared_bob.y]);
 
         assert_eq!(sh_key_alice, sh_key_bob);
+    }
+
+    #[test]
+    fn test_serialize_deserialize() {
+        let rng = &mut ark_std::test_rng();
+        let (pub_key, priv_key) = Ecdh::<JubJub>::generate_keys(rng);
+
+        let serialized_pub_key = Ecdh::<JubJub>::serialize_public_key(pub_key.clone());
+        let deserialized_pub_key = Ecdh::<JubJub>::deserialize_public_key(serialized_pub_key);
+        assert_eq!(pub_key, deserialized_pub_key);
+
+        let serialized_priv_key = Ecdh::<JubJub>::serialize_private_key(priv_key.clone());
+        let deserialized_priv_key = Ecdh::<JubJub>::deserialize_private_key(serialized_priv_key);
+        assert_eq!(priv_key, deserialized_priv_key);
     }
 }

@@ -10,13 +10,12 @@ use liminal_ark_relation_macro::snark_relation;
 mod relation {
     #[cfg(feature = "circuit")]
     use {
-        crate::environment::FpVar,
+        crate::environment::{CircuitField, FpVar},
         ark_r1cs_std::{alloc::AllocVar, eq::EqGadget},
         ark_relations::ns,
         core::cmp::Ordering,
+        liminal_ark_poseidon::circuit::two_to_one_hash,
     };
-
-    use crate::environment::CircuitField;
 
     use crate::disputes::{
         hash_to_field,
@@ -35,6 +34,12 @@ mod relation {
         // Public inputs
         #[public_input(frontend_type = "FrontendHash", parse_with = "hash_to_field")]
         pub encrypted_vote: BackendHash,
+
+        #[public_input(frontend_type = "FrontendHash", parse_with = "hash_to_field")]
+        pub old_encrypted_all_votes: BackendHash,
+
+        #[public_input(frontend_type = "FrontendHash", parse_with = "hash_to_field")]
+        pub new_encrypted_all_votes: BackendHash,
     }
 
     #[cfg(feature = "circuit")]
@@ -44,6 +49,12 @@ mod relation {
         let hashed_shared_key =
             FpVar::new_witness(ns!(cs, "hashed_shared_key"), || self.hashed_shared_key())?;
         let encrypted_vote = FpVar::new_input(ns!(cs, "encrypted_vote"), || self.encrypted_vote())?;
+        let old_encrypted_all_votes = FpVar::new_input(ns!(cs, "old_encrypted_all_votes"), || {
+            self.old_encrypted_all_votes()
+        })?;
+        let new_encrypted_all_votes = FpVar::new_input(ns!(cs, "new_encrypted_all_votes"), || {
+            self.new_encrypted_all_votes()
+        })?;
 
         //---------------------------------------
         // Check if vote has valid values: [0,1]
@@ -54,20 +65,29 @@ mod relation {
         vote.enforce_cmp(&zero, Ordering::Greater, true)?;
 
         //---------------------------------------
-        // Check if vote was created from the 
+        // Check if vote was created from the
         // hash of the shared key.
         //---------------------------------------
         let hash_result = vote + hashed_shared_key;
         encrypted_vote.enforce_equal(&hash_result)?;
 
+        //---------------------------------------
+        // Check if has of all votes was created
+        // correctly.
+        //---------------------------------------
+        let hash_result = two_to_one_hash(cs.clone(), [encrypted_vote, old_encrypted_all_votes])?;
+        new_encrypted_all_votes.enforce_equal(&hash_result)?;
         Ok(())
     }
 }
 
 #[cfg(all(test, feature = "circuit"))]
 mod tests {
-    use super::{VoteRelationWithFullInput, VoteRelationWithPublicInput, VoteRelationWithoutInput};
-    use crate::disputes::ecdh::{Ecdh, EcdhScheme};
+    use super::{
+        hash_to_field, VoteRelationWithFullInput,
+        VoteRelationWithPublicInput, VoteRelationWithoutInput,
+    };
+    use crate::disputes::{ecdh::{Ecdh, EcdhScheme}, make_two_to_one_hash};
     use crate::disputes::vote_to_filed;
     use ark_bls12_381::Bls12_381;
     use ark_crypto_primitives::SNARK;
@@ -84,8 +104,17 @@ mod tests {
         let hashed_shared_key = two_to_one_hash([hashed_shared_key.x, hashed_shared_key.y]);
         let vote: u8 = 1;
         let encrypted_vote = vote_to_filed(vote) + hashed_shared_key;
+        let old_encrypted_all_votes = hash_to_field([1u64; 4]);
+        let new_encrypted_all_votes =
+            make_two_to_one_hash(encrypted_vote, old_encrypted_all_votes.clone());
 
-        VoteRelationWithFullInput::new(encrypted_vote.0 .0, vote, hashed_shared_key.0 .0)
+        VoteRelationWithFullInput::new(
+            encrypted_vote.0 .0,
+            old_encrypted_all_votes.0 .0,
+            new_encrypted_all_votes.0 .0,
+            vote,
+            hashed_shared_key.0 .0,
+        )
     }
 
     #[test]
@@ -99,7 +128,6 @@ mod tests {
         if !is_satisfied {
             println!("{:?}", cs.which_is_unsatisfied());
         }
-
         assert!(is_satisfied);
     }
 
