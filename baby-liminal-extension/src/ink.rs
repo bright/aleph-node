@@ -29,3 +29,34 @@ impl Environment for BabyLiminalEnvironment {
 
     type ChainExtension = Extension;
 }
+
+#[cfg(test)]
+pub mod mock_test {
+
+    use crate::Vec;
+    use crate::{AccountId32, BabyLiminalError, VerificationKeyIdentifier};
+
+    #[derive(Clone, Default)]
+    pub struct VerifiedMock;
+
+    #[obce::mock]
+    impl crate::BabyLiminalExtension for () {
+        fn store_key(
+            &mut self,
+            _: AccountId32,
+            _: VerificationKeyIdentifier,
+            _: Vec<u8>,
+        ) -> Result<(), BabyLiminalError> {
+            Ok(())
+        }
+
+        fn verify(
+            &mut self,
+            _: VerificationKeyIdentifier,
+            _: Vec<u8>,
+            _: Vec<u8>,
+        ) -> Result<(), BabyLiminalError> {
+            Ok(())
+        }
+    }
+}

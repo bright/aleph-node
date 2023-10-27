@@ -711,7 +711,7 @@ impl pallet_contracts::Config for Runtime {
     type CallFilter = Nothing;
     type WeightPrice = pallet_transaction_payment::Pallet<Self>;
     type WeightInfo = pallet_contracts::weights::SubstrateWeight<Self>;
-    type ChainExtension = ();
+    type ChainExtension = (); //baby_liminal_extension::substrate::Extension;
     type Schedule = Schedule;
     type CallStack = [pallet_contracts::Frame<Self>; 16];
     type DepositPerByte = DepositPerByte;

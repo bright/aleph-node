@@ -1,4 +1,4 @@
-mod ecdh;
+pub mod ecdh;
 mod types;
 mod verdict;
 mod vote;
@@ -8,7 +8,9 @@ pub use types::{
     FrontendVote, FrontendVotes, FrontendVotesSum,
 };
 
+use ark_ed_on_bls12_381::EdwardsAffine as JubJub;
 use ark_ff::BigInteger256;
+use liminal_ark_poseidon::hash::two_to_one_hash;
 
 #[derive(Debug)]
 pub enum Error {
@@ -39,6 +41,11 @@ pub fn field_to_vote(field: BackendVote) -> FrontendVote {
 
 pub fn vec_of_votes_to_fields(front: FrontendVotes) -> BackendVotes {
     front.into_iter().map(vote_to_filed).collect()
+}
+
+pub fn make_shared_key_hash(shared_key: JubJub) -> FrontendHash {
+    let hash = two_to_one_hash([shared_key.x, shared_key.y]);
+    hash.0 .0
 }
 
 #[cfg(all(test))]
